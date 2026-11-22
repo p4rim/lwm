@@ -338,6 +338,7 @@ fn main() -> Result<(), Box<dyn Error>>{
                 if event.mode == NotifyMode::NORMAL && wm.windows.contains(&event.event) {
                     wm.focus_window(&conn, event.event)?;
                 }
+
             }
 
 
