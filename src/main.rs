@@ -1,27 +1,15 @@
-use std::process::Command;
 use std::error::Error;
+use std::process::Command;
 
 use x11rb::connection::Connection;
-use x11rb::protocol::xproto::{
-    ChangeWindowAttributesAux,
-    EventMask,
-
-};
+use x11rb::protocol::xproto::{ChangeWindowAttributesAux, EventMask};
 
 use x11rb::protocol::Event;
-use x11rb::rust_connection::RustConnection;
 use x11rb::protocol::xproto::{
-    ConnectionExt, 
-    Window, 
-    ConfigureWindowAux,
-    ModMask,
-    GrabMode,
-    AtomEnum,
-    ClientMessageEvent,
-    InputFocus,
-    NotifyMode,
-    KeyButMask,
+    AtomEnum, ClientMessageEvent, ConfigureWindowAux, ConnectionExt, GrabMode, InputFocus,
+    KeyButMask, ModMask, NotifyMode, Window,
 };
+use x11rb::rust_connection::RustConnection;
 
 struct WindowManager {
     windows: Vec<Window>,
@@ -31,7 +19,7 @@ struct WindowManager {
 }
 
 impl WindowManager {
-    fn tile(&self,conn: &RustConnection,) -> Result<(), Box<dyn Error>> {
+    fn tile(&self, conn: &RustConnection) -> Result<(), Box<dyn Error>> {
         let count = self.windows.len();
 
         if count == 0 {
@@ -39,7 +27,7 @@ impl WindowManager {
         }
 
         let width = u32::from(self.screen_width);
-        let height= u32::from(self.screen_height);
+        let height = u32::from(self.screen_height);
 
         for (i, &Window) in self.windows.iter().enumerate() {
             let left = width * i as u32 / count as u32;
@@ -61,7 +49,11 @@ impl WindowManager {
         Ok(())
     }
 
-    fn focus_window(&mut self, conn: &RustConnection, window: Window) -> Result<(), Box<dyn Error>> {
+    fn focus_window(
+        &mut self,
+        conn: &RustConnection,
+        window: Window,
+    ) -> Result<(), Box<dyn Error>> {
         if !self.windows.contains(&window) {
             return Ok(());
         }
@@ -75,24 +67,18 @@ impl WindowManager {
             if old != window {
                 conn.change_window_attributes(
                     old,
-                    &ChangeWindowAttributesAux::new()
-                        .border_pixel(0x333333),
+                    &ChangeWindowAttributesAux::new().border_pixel(0x333333),
                 )?;
             }
         }
 
         // Tell X11 where keyboard input should go.
-        conn.set_input_focus(
-            InputFocus::POINTER_ROOT,
-            window,
-            x11rb::CURRENT_TIME,
-        )?;
+        conn.set_input_focus(InputFocus::POINTER_ROOT, window, x11rb::CURRENT_TIME)?;
 
         // Highlight the newly focused window.
         conn.change_window_attributes(
             window,
-            &ChangeWindowAttributesAux::new()
-                .border_pixel(0x80B4FA),
+            &ChangeWindowAttributesAux::new().border_pixel(0x80B4FA),
         )?;
 
         self.focused = Some(window);
@@ -108,9 +94,7 @@ impl WindowManager {
 
         let index = self
             .focused
-            .and_then(|focused| {
-                self.windows.iter().position(|&w| w == focused)
-            })
+            .and_then(|focused| self.windows.iter().position(|&w| w == focused))
             .map(|i| (i + 1) % self.windows.len())
             .unwrap_or(0);
 
@@ -128,10 +112,8 @@ impl WindowManager {
 
         let index = self
             .focused
-            .and_then(|focused| {
-                self.windows.iter().position(|&w| w == focused)
-            }) 
-            .map(|i| (i + len - 1) % len) 
+            .and_then(|focused| self.windows.iter().position(|&w| w == focused))
+            .map(|i| (i + len - 1) % len)
             .unwrap_or(len - 1);
 
         let window = self.windows[index];
@@ -145,25 +127,14 @@ impl WindowManager {
         };
 
         // Get the X11 atoms used for graceful closing.
-        let wm_protocols = conn
-            .intern_atom(false, b"WM_PROTOCOLS")?
-            .reply()?
-            .atom;
+        let wm_protocols = conn.intern_atom(false, b"WM_PROTOCOLS")?.reply()?.atom;
 
-        let wm_delete = conn
-            .intern_atom(false, b"WM_DELETE_WINDOW")?
-            .reply()?
-            .atom;
+        let wm_delete = conn.intern_atom(false, b"WM_DELETE_WINDOW")?.reply()?.atom;
 
         // Check whether the application supports WM_DELETE_WINDOW.
-        let protocols = conn.get_property(
-            false,
-            Window,
-            wm_protocols,
-            AtomEnum::ATOM,
-            0,
-            u32::MAX,
-        )?.reply()?;
+        let protocols = conn
+            .get_property(false, Window, wm_protocols, AtomEnum::ATOM, 0, u32::MAX)?
+            .reply()?;
 
         let supports_delete = protocols
             .value32()
@@ -178,12 +149,7 @@ impl WindowManager {
                 [wm_delete, x11rb::CURRENT_TIME, 0, 0, 0],
             );
 
-            conn.send_event(
-                false,
-                Window,
-                EventMask::NO_EVENT,
-                event,
-            )?;
+            conn.send_event(false, Window, EventMask::NO_EVENT, event)?;
 
             conn.flush()?;
         } else {
@@ -206,7 +172,13 @@ fn spawn_browser() {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>>{
+fn close_lwm() {
+    if let Err(error) = Command::new("pkill lwm").spawn() {
+        eprintln!("Failed to shutdown lwm: {error}");
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
     // Connect to the X server
     let (conn, screen_num) = RustConnection::connect(None)?;
 
@@ -225,17 +197,14 @@ fn main() -> Result<(), Box<dyn Error>>{
     };
 
     // Ask X11 to send window management events to us
-    let values = ChangeWindowAttributesAux::new().event_mask(
-        EventMask::SUBSTRUCTURE_REDIRECT
-        | EventMask::SUBSTRUCTURE_NOTIFY,
-    ); 
+    let values = ChangeWindowAttributesAux::new()
+        .event_mask(EventMask::SUBSTRUCTURE_REDIRECT | EventMask::SUBSTRUCTURE_NOTIFY);
 
     // Only one WM can own SubstructureRedirect.
     // Check the request so we detect another WM.
-    conn.change_window_attributes(root, &values)?
-        .check()?;
+    conn.change_window_attributes(root, &values)?.check()?;
 
-    // Keycodes for shortcuts 
+    // Keycodes for shortcuts
     let h_keycode = 43;
     let j_keycode = 44;
     let k_keycode = 45;
@@ -244,7 +213,15 @@ fn main() -> Result<(), Box<dyn Error>>{
     let enter_keycode = 36;
     let b_keycode = 56;
 
-    let keycodes = [h_keycode, j_keycode, k_keycode, l_keycode, q_keycode, enter_keycode, b_keycode];
+    let keycodes = [
+        h_keycode,
+        j_keycode,
+        k_keycode,
+        l_keycode,
+        q_keycode,
+        enter_keycode,
+        b_keycode,
+    ];
 
     for keycode in keycodes {
         conn.grab_key(
@@ -277,8 +254,7 @@ fn main() -> Result<(), Box<dyn Error>>{
                 // Listen for the mouse entering this window.
                 conn.change_window_attributes(
                     event.window,
-                    &ChangeWindowAttributesAux::new()
-                        .event_mask(EventMask::ENTER_WINDOW),
+                    &ChangeWindowAttributesAux::new().event_mask(EventMask::ENTER_WINDOW),
                 )?;
 
                 conn.map_window(event.window)?;
@@ -291,9 +267,7 @@ fn main() -> Result<(), Box<dyn Error>>{
                 // Managed windows are controlled by our tiling layout.
                 // Unmanaged windows can configure themselves.
                 if !wm.windows.contains(&event.window) {
-                    let values = 
-                        ConfigureWindowAux::from_configure_request(&event);
-
+                    let values = ConfigureWindowAux::from_configure_request(&event);
 
                     conn.configure_window(event.window, &values)?;
                 }
@@ -314,11 +288,7 @@ fn main() -> Result<(), Box<dyn Error>>{
                     if let Some(&next) = wm.windows.last() {
                         wm.focus_window(&conn, next)?;
                     } else {
-                        conn.set_input_focus(
-                            InputFocus::POINTER_ROOT,
-                            root,
-                            x11rb::CURRENT_TIME,
-                        )?;
+                        conn.set_input_focus(InputFocus::POINTER_ROOT, root, x11rb::CURRENT_TIME)?;
                     }
                 }
             }
@@ -333,20 +303,19 @@ fn main() -> Result<(), Box<dyn Error>>{
             Event::EnterNotify(event) => {
                 if wm.windows.contains(&event.event) {
                     wm.focus_window(&conn, event.event)?;
-                } 
+                }
 
                 if event.mode == NotifyMode::NORMAL && wm.windows.contains(&event.event) {
                     wm.focus_window(&conn, event.event)?;
                 }
-
             }
-
 
             Event::KeyPress(event) => {
                 if event.state.contains(KeyButMask::MOD4) {
                     match event.detail {
                         36 => spawn_terminal(),
                         56 => spawn_browser(),
+                        57 => close_lwm(),
                         46 => wm.focus_next(&conn)?,
                         43 => wm.focus_previous(&conn)?,
                         24 => wm.close_focused(&conn)?,
